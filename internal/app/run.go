@@ -138,6 +138,10 @@ func Main() {
 			var storefront, albumId string
 
 			if strings.Contains(urlRaw, "/music-video/") {
+				if r.Config.AudioOnly {
+					fmt.Println("Skipping music video URL (audio-only)")
+					continue
+				}
 				fmt.Println("Music Video")
 				if r.Flags.Debug {
 					continue

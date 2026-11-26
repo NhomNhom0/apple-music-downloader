@@ -23,6 +23,11 @@ func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken strin
 
 	//mv dl dev
 	if track.Type == "music-videos" {
+		if r.Config.AudioOnly {
+			fmt.Println("Skipping music video (audio-only):", track.ID)
+			r.State.Counter.NotSong++
+			return
+		}
 		if r.Config.LiteServer == "" {
 			fmt.Println("lite-server is not set, skip MV dl")
 			r.State.Counter.Success++
