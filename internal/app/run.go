@@ -183,6 +183,9 @@ func Main() {
 				if err != nil {
 					fmt.Println("Failed to rip song:", err)
 				}
+				if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
+					break
+				}
 				continue
 			}
 			parse, err := url.Parse(urlRaw)
