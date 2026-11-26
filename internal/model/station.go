@@ -45,7 +45,13 @@ func (a *Station) GetResp(mutoken, token, l string) error {
 	if err != nil {
 		return errors.New("error getting station response")
 	}
+	if len(resp.Data) == 0 {
+		return errors.New("station response contains no data")
+	}
 	a.Resp = *resp
+	if a.Resp.Data[0].Attributes.PlayParams.Format != "tracks" {
+		return nil
+	}
 	//简化高频调用名称
 	a.Type = a.Resp.Data[0].Attributes.PlayParams.Format
 	a.Name = a.Resp.Data[0].Attributes.Name

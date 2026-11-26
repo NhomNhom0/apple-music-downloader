@@ -46,6 +46,9 @@ func (a *Playlist) GetResp(token, l string) error {
 	if err != nil {
 		return errors.New("error getting album response")
 	}
+	if len(resp.Data) == 0 || len(resp.Data[0].Relationships.Tracks.Data) == 0 {
+		return errors.New("playlist response contains no tracks")
+	}
 	a.Resp = *resp
 
 	a.Resp.Data[0].Attributes.ArtistName = "Apple Music"

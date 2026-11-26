@@ -53,17 +53,38 @@ func (r *Runner) processSelectedTracks(tracks []model.Track, selected []int, com
 	}
 }
 
+// accountLookupFailure counts failures before ripTrack, without double counting
+// nested collection failures. Collection IDs are never presented as song IDs.
+func (r *Runner) accountLookupFailure(err error, before, totalBefore int) {
+	if err != nil && r.State.Counter.Error == before {
+		r.State.Counter.Error++
+	}
+	if err != nil && r.State.Counter.Total == totalBefore {
+		r.State.Counter.Total++
+	}
+}
+
 func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken string) {
+	var incompletePath string
+	mediaComplete := false
 	before := r.State.Counter.Error
 	unavailableBefore := r.State.Counter.Unavailable
 	defer func() {
 		// Legacy Unavailable includes manifest, ALAC repair and tagging failures.
-		// In stop mode these must also make the job fail, not silently continue.
-		if r.Config.StopOnTrackError && r.State.Counter.Unavailable > unavailableBefore && r.State.Counter.Error == before {
+		// Stop mode controls dispatch/markers, never whether a failed track counts.
+		if r.State.Counter.Unavailable > unavailableBefore && r.State.Counter.Error == before {
 			r.State.Counter.Error++
 		}
-		if r.Config.StopOnTrackError && r.State.Counter.Error > before {
-			fmt.Println(trackErrorMarker(track))
+		if r.State.Counter.Error > before {
+			// Failed downloads/repair/tagging must not become next-run successes.
+			// Conversion errors deliberately retain the complete original for retry.
+			if incompletePath != "" && !mediaComplete {
+				_ = os.Remove(incompletePath)
+				_ = os.Remove(incompletePath + ".part")
+			}
+			if r.Config.StopOnTrackError {
+				fmt.Println(trackErrorMarker(track))
+			}
 		}
 	}()
 	var err error
@@ -255,6 +276,7 @@ func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken strin
 		}
 	}
 
+	incompletePath = trackPath
 	if needDlAacLc {
 		if r.Config.LiteServer == "" {
 			fmt.Println("aac-lc download requires lite-server, but it is not configured")
@@ -331,6 +353,8 @@ func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken strin
 		}
 	}
 
+	mediaComplete = true
+
 	// CONVERSION FEATURE hook
 	if err := r.convertIfNeeded(track); err != nil {
 		fmt.Println("Conversion failed:", err)
@@ -362,9 +386,12 @@ func releaseYear(date string) string {
 }
 
 func (r *Runner) ripStation(albumId string, token string, storefront string, mediaUserToken string) error {
+	before := r.State.Counter.Error
+	totalBefore := r.State.Counter.Total
 	station := model.NewStation(storefront, albumId)
 	err := station.GetResp(mediaUserToken, token, r.Config.Language)
 	if err != nil {
+		r.accountLookupFailure(err, before, totalBefore)
 		return err
 	}
 	fmt.Println(" -", station.Type)
@@ -569,10 +596,13 @@ func (r *Runner) ripStation(albumId string, token string, storefront string, med
 }
 
 func (r *Runner) ripAlbum(albumId string, token string, storefront string, mediaUserToken string, urlArg_i string) error {
+	before := r.State.Counter.Error
+	totalBefore := r.State.Counter.Total
 	album := model.NewAlbum(storefront, albumId)
 	err := album.GetResp(token, r.Config.Language)
 	if err != nil {
 		fmt.Println("Failed to get album response.")
+		r.accountLookupFailure(err, before, totalBefore)
 		return err
 	}
 	meta := album.Resp
@@ -786,10 +816,13 @@ func (r *Runner) ripAlbum(albumId string, token string, storefront string, media
 }
 
 func (r *Runner) ripPlaylist(playlistId string, token string, storefront string, mediaUserToken string) error {
+	before := r.State.Counter.Error
+	totalBefore := r.State.Counter.Total
 	playlist := model.NewPlaylist(storefront, playlistId)
 	err := playlist.GetResp(token, r.Config.Language)
 	if err != nil {
 		fmt.Println("Failed to get playlist response.")
+		r.accountLookupFailure(err, before, totalBefore)
 		return err
 	}
 	meta := playlist.Resp
@@ -973,10 +1006,28 @@ func (r *Runner) ripPlaylist(playlistId string, token string, storefront string,
 }
 
 func (r *Runner) ripSong(songId string, token string, storefront string, mediaUserToken string) error {
+	before := r.State.Counter.Error
+	totalBefore := r.State.Counter.Total
 	// Get song info to find album ID
 	manifest, err := ampapi.GetSongResp(storefront, songId, r.Config.Language, token)
 	if err != nil {
 		fmt.Println("Failed to get song response.")
+		r.accountLookupFailure(err, before, totalBefore)
+		if r.Config.StopOnTrackError && songId != "" {
+			fmt.Println(trackErrorMarker(&model.Track{ID: songId, TaskNum: 1, TaskTotal: 1}))
+		}
+		return err
+	}
+	if len(manifest.Data) == 0 || len(manifest.Data[0].Relationships.Albums.Data) == 0 {
+		err = fmt.Errorf("song response missing album identity")
+		r.accountLookupFailure(err, before, totalBefore)
+		if r.Config.StopOnTrackError && songId != "" {
+			track := &model.Track{ID: songId, TaskNum: 1, TaskTotal: 1}
+			if len(manifest.Data) > 0 {
+				track.Name = manifest.Data[0].Attributes.Name
+			}
+			fmt.Println(trackErrorMarker(track))
+		}
 		return err
 	}
 
@@ -987,6 +1038,10 @@ func (r *Runner) ripSong(songId string, token string, storefront string, mediaUs
 	err = r.ripAlbum(albumId, token, storefront, mediaUserToken, songId)
 	if err != nil {
 		fmt.Println("Failed to rip song:", err)
+		r.accountLookupFailure(err, before, totalBefore)
+		if r.Config.StopOnTrackError {
+			fmt.Println(trackErrorMarker(&model.Track{ID: songId, Name: songData.Attributes.Name, TaskNum: 1, TaskTotal: 1}))
+		}
 		return err
 	}
 

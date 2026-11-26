@@ -46,6 +46,9 @@ func (a *Album) GetResp(token, l string) error {
 	if err != nil {
 		return errors.New("error getting album response")
 	}
+	if len(resp.Data) == 0 || len(resp.Data[0].Relationships.Tracks.Data) == 0 {
+		return errors.New("album response contains no tracks")
+	}
 	a.Resp = *resp
 	//简化高频调用名称
 	a.Name = a.Resp.Data[0].Attributes.Name

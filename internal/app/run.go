@@ -1,13 +1,13 @@
 package app
 
 import (
+	"amdl/internal/amp-api"
+	"amdl/internal/config"
+	"amdl/internal/download"
+	fairplayrip "amdl/internal/fairplay-rip"
 	"encoding/json"
 	"fmt"
 	"github.com/spf13/pflag"
-	"amdl/internal/amp-api"
-	fairplayrip "amdl/internal/fairplay-rip"
-	"amdl/internal/config"
-	"amdl/internal/download"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -131,9 +131,27 @@ func Main() {
 		}
 		os.Args = append(albumArgs, mvArgs...)
 	}
-	albumTotal := len(os.Args)
+	if r.runQueue(os.Args, token) {
+		os.Exit(1)
+	}
+
+	// Print JSON output
+	if r.Flags.PrintJSON {
+		jsonOutput, err := json.Marshal(r.State.AddedTracks)
+		if err != nil {
+			fmt.Println("Error generating JSON output:", err)
+		} else {
+			fmt.Println(string(jsonOutput))
+		}
+	}
+}
+
+// runQueue is the production URL dispatcher; returning true lets Main own the
+// exit status while tests can inspect the exact same queue without exiting.
+func (r *Runner) runQueue(args []string, token string) bool {
+	albumTotal := len(args)
 	for {
-		for albumNum, urlRaw := range os.Args {
+		for albumNum, urlRaw := range args {
 			fmt.Printf("Queue %d of %d: ", albumNum+1, albumTotal)
 			var storefront, albumId string
 
@@ -177,6 +195,11 @@ func Main() {
 				storefront, songId := checkUrl(urlRaw, "song")
 				if storefront == "" || songId == "" {
 					fmt.Println("Invalid song URL format.")
+					r.State.Counter.Total++
+					r.State.Counter.Error++
+					if r.Config.StopOnTrackError {
+						break
+					}
 					continue
 				}
 				err := r.ripSong(songId, token, storefront, r.Config.MediaUserToken)
@@ -233,7 +256,7 @@ func Main() {
 			break
 		} else if r.Config.ExitOnError || r.Config.StopOnTrackError {
 			fmt.Println("Error detected, exiting...")
-			os.Exit(1)
+			return true
 		} else {
 			fmt.Println("Error detected, press Enter to try again...")
 			fmt.Scanln()
@@ -242,14 +265,5 @@ func Main() {
 
 		r.State.Counter = config.Counter{}
 	}
-
-	// Print JSON output
-	if r.Flags.PrintJSON {
-		jsonOutput, err := json.Marshal(r.State.AddedTracks)
-		if err != nil {
-			fmt.Println("Error generating JSON output:", err)
-		} else {
-			fmt.Println(string(jsonOutput))
-		}
-	}
+	return false
 }
