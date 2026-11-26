@@ -1,13 +1,13 @@
 package app
 
 import (
+	"amdl/internal/amp-api"
+	"amdl/internal/config"
+	"amdl/internal/download"
+	fairplayrip "amdl/internal/fairplay-rip"
 	"encoding/json"
 	"fmt"
 	"github.com/spf13/pflag"
-	"amdl/internal/amp-api"
-	fairplayrip "amdl/internal/fairplay-rip"
-	"amdl/internal/config"
-	"amdl/internal/download"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -138,6 +138,10 @@ func Main() {
 			var storefront, albumId string
 
 			if strings.Contains(urlRaw, "/music-video/") {
+				if r.Config.AudioOnly {
+					fmt.Println("Skipping music video URL (audio-only)")
+					continue
+				}
 				fmt.Println("Music Video")
 				if r.Flags.Debug {
 					continue

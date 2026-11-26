@@ -9,6 +9,7 @@ import (
 	"amdl/internal/model"
 	"amdl/internal/widevine-rip"
 	"amdl/internal/widevine-rip/runv5"
+	"encoding/json"
 	"fmt"
 	"github.com/itouakirai/go-mp4tag"
 	"os"
@@ -17,7 +18,20 @@ import (
 )
 
 func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken string) {
+	if r.Config.AudioOnly && track.Type == "music-videos" {
+		fmt.Println("Skipping music video (audio-only):", track.Name)
+		return
+	}
 	var err error
+	errorsBefore := r.State.Counter.Error
+	defer func() {
+		if r.Config.StopOnTrackError && r.State.Counter.Error > errorsBefore {
+			payload, _ := json.Marshal(map[string]interface{}{"id": track.ID, "name": track.Name, "track": track.TaskNum, "total": track.TaskTotal})
+			fmt.Printf("AMDL_TRACK_ERROR %s\n", payload)
+			// Exit before the album loop can start another track.
+			os.Exit(1)
+		}
+	}()
 	r.State.Counter.Total++
 	fmt.Printf("Track %d of %d: %s\n", track.TaskNum, track.TaskTotal, track.Type)
 

@@ -1,6 +1,8 @@
 package config
 
 type ConfigSet struct {
+	AudioOnly                  bool   `yaml:"audio-only"`
+	StopOnTrackError           bool   `yaml:"stop-on-track-error"`
 	Storefront                 string `yaml:"storefront"`
 	MediaUserToken             string `yaml:"media-user-token"`
 	AuthorizationToken         string `yaml:"authorization-token"`

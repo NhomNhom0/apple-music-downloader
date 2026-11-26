@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -37,7 +38,19 @@ var lib *temarimod.Library
 // Init loads the Temari decryption library bundled with the module.
 func Init() error {
 	var err error
-	lib, err = temarimod.LoadDefault()
+	if libraryPath := os.Getenv("TEMARI_LIB"); libraryPath != "" {
+		lib, err = temarimod.Load(libraryPath)
+	} else if executable, executableErr := os.Executable(); executableErr == nil {
+		// A deployed binary need not retain the build machine's Go module cache.
+		libraryPath := filepath.Join(filepath.Dir(executable), "libtemari.so")
+		if _, statErr := os.Stat(libraryPath); statErr == nil {
+			lib, err = temarimod.Load(libraryPath)
+		} else {
+			lib, err = temarimod.LoadDefault()
+		}
+	} else {
+		lib, err = temarimod.LoadDefault()
+	}
 	if err != nil {
 		return fmt.Errorf("runv4: load temari library: %w", err)
 	}
