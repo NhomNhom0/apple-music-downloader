@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"amdl/internal/config"
@@ -51,7 +52,7 @@ func TestUnavailableTrackStopsOnlyWhenConfigured(t *testing.T) {
 			if r.State.Counter.Total != 1 || r.State.Counter.Error != 1 || r.State.Counter.Unavailable != 1 {
 				t.Fatalf("stop counters=%+v %q", r.State.Counter, out)
 			}
-		} else if r.State.Counter.Total != 2 || r.State.Counter.Error != 0 || r.State.Counter.Unavailable != 2 {
+		} else if r.State.Counter.Total != 2 || r.State.Counter.Error != 2 || r.State.Counter.Unavailable != 2 || strings.Contains(out, "AMDL_TRACK_ERROR ") {
 			t.Fatalf("continue counters=%+v %q", r.State.Counter, out)
 		}
 	}
