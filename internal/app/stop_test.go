@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +23,14 @@ func TestTrackErrorMarkerWorkerProtocol(t *testing.T) {
 	}
 	if len(payload) != 4 || payload["id"] != "song-3" || payload["track"] != float64(3) || payload["total"] != float64(4) || payload["name"] != track.Resp.Attributes.Name {
 		t.Fatalf("worker marker fields: %#v", payload)
+	}
+}
+
+func TestConversionFailureCountsAsTrackError(t *testing.T) {
+	r := NewRunner(config.ConfigSet{ConvertAfterDownload: true, ConvertFormat: "flac", FFmpegPath: "definitely-not-a-ffmpeg-binary"})
+	track := &model.Track{SavePath: filepath.Join(t.TempDir(), "source.m4a")}
+	if err := r.convertIfNeeded(track); err == nil {
+		t.Fatal("conversion without ffmpeg unexpectedly succeeded")
 	}
 }
 

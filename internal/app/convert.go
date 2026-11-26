@@ -103,8 +103,7 @@ func (r *Runner) convertIfNeeded(track *model.Track) error {
 	}
 
 	if _, err := exec.LookPath(r.Config.FFmpegPath); err != nil {
-		fmt.Printf("ffmpeg not found at '%s'; skipping conversion.\n", r.Config.FFmpegPath)
-		return nil
+		return fmt.Errorf("ffmpeg not found at %q: %w", r.Config.FFmpegPath, err)
 	}
 
 	args, err := r.buildFFmpegArgs(r.Config.FFmpegPath, srcPath, outPath, targetFmt, r.Config.ConvertExtraArgs)
@@ -143,6 +142,7 @@ func (r *Runner) convertIfNeeded(track *model.Track) error {
 				}
 			}
 		}
+		return fmt.Errorf("ffmpeg reported ALAC decode errors")
 	} else {
 		fmt.Printf("Conversion completed in %s: %s\n", time.Since(start).Truncate(time.Millisecond), filepath.Base(outPath))
 
