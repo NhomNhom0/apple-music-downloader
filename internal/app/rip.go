@@ -9,6 +9,7 @@ import (
 	"amdl/internal/model"
 	"amdl/internal/widevine-rip"
 	"amdl/internal/widevine-rip/runv5"
+	"encoding/json"
 	"fmt"
 	"github.com/itouakirai/go-mp4tag"
 	"os"
@@ -16,7 +17,28 @@ import (
 	"strings"
 )
 
+// trackErrorMarker is the worker's line-oriented pause/skip protocol.
+func trackErrorMarker(track *model.Track) string {
+	name := track.Resp.Attributes.Name
+	if name == "" {
+		name = track.Name
+	}
+	data, _ := json.Marshal(struct {
+		ID    string `json:"id"`
+		Track int    `json:"track"`
+		Total int    `json:"total"`
+		Name  string `json:"name"`
+	}{track.ID, track.TaskNum, track.TaskTotal, name})
+	return "AMDL_TRACK_ERROR " + string(data)
+}
+
 func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken string) {
+	before := r.State.Counter.Error
+	defer func() {
+		if r.Config.StopOnTrackError && r.State.Counter.Error > before {
+			fmt.Println(trackErrorMarker(track))
+		}
+	}()
 	var err error
 	r.State.Counter.Total++
 	fmt.Printf("Track %d of %d: %s\n", track.TaskNum, track.TaskTotal, track.Type)
@@ -514,6 +536,9 @@ func (r *Runner) ripStation(albumId string, token string, storefront string, med
 		i++
 		if contains(selected, i) {
 			r.ripTrack(&station.Tracks[i-1], token, mediaUserToken)
+			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
+				break
+			}
 		}
 	}
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)
@@ -740,6 +765,9 @@ func (r *Runner) ripAlbum(albumId string, token string, storefront string, media
 		}
 		if contains(selected, i) {
 			r.ripTrack(&album.Tracks[i-1], token, mediaUserToken)
+			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
+				break
+			}
 		}
 	}
 	r.saveM3UPlaylist(albumFolderPath, albumFolderName)
@@ -938,6 +966,9 @@ func (r *Runner) ripPlaylist(playlistId string, token string, storefront string,
 		}
 		if contains(selected, i) {
 			r.ripTrack(&playlist.Tracks[i-1], token, mediaUserToken)
+			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
+				break
+			}
 		}
 	}
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)

@@ -54,6 +54,7 @@ type ConfigSet struct {
 	ALACFix                    bool   `yaml:"alac-fix"`
 	ExitOnError                bool   `yaml:"exit-on-error"`
 	AudioOnly                  bool   `yaml:"audio-only"`
+	StopOnTrackError           bool   `yaml:"stop-on-track-error"`
 	Proxy                      string `yaml:"proxy"`
 }
 

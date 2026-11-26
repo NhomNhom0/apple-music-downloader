@@ -221,11 +221,14 @@ func Main() {
 			} else {
 				fmt.Println("Invalid type")
 			}
+			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
+				break
+			}
 		}
 		fmt.Printf("=======  [\u2714 ] Completed: %d/%d  |  [\u26A0 ] Warnings: %d  |  [\u2716 ] Errors: %d  =======\n", r.State.Counter.Success, r.State.Counter.Total, r.State.Counter.Unavailable+r.State.Counter.NotSong, r.State.Counter.Error)
 		if r.State.Counter.Error == 0 {
 			break
-		} else if r.Config.ExitOnError {
+		} else if r.Config.ExitOnError || r.Config.StopOnTrackError {
 			fmt.Println("Error detected, exiting...")
 			os.Exit(1)
 		} else {
