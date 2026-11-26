@@ -1,41 +1,96 @@
 package app
 
 import (
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"amdl/internal/config"
 	"amdl/internal/model"
 )
 
-func TestAudioOnlySkipsMusicVideoWithoutError(t *testing.T) {
-	r := NewRunner(config.ConfigSet{AudioOnly: true, LiteServer: "https://must-not-be-contacted.invalid"})
-	r.ripTrack(&model.Track{Type: "music-videos", ID: "video-1"}, "", "")
-	if r.State.Counter.Total != 1 || r.State.Counter.NotSong != 1 || r.State.Counter.Error != 0 || r.State.Counter.Success != 0 {
-		t.Fatalf("unexpected skipped video counters: %+v", r.State.Counter)
+func captureDispatch(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	defer func() { os.Stdout = old; reader.Close() }()
+	fn()
+	writer.Close()
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(result)
+}
+
+func TestCollectionDispatchStopAndContinue(t *testing.T) {
+	for _, tc := range []struct {
+		name                              string
+		stop                              bool
+		wantTotal, wantSuccess, wantError int
+	}{
+		{"album-stop", true, 2, 1, 1}, {"playlist-continue", false, 4, 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Already saved first song exercises the production success path without media.
+			if err := os.WriteFile(filepath.Join(dir, "first.m4a"), []byte("offline fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r := NewRunner(config.ConfigSet{StopOnTrackError: tc.stop, AacType: "aac-lc", SongFileFormat: "{SongName}", LimitMax: 200, LrcFormat: "lrc"})
+			r.Flags.AAC = true
+			tracks := []model.Track{
+				{ID: "one", Type: "songs", SaveDir: dir, TaskNum: 1, TaskTotal: 4},
+				{ID: "two", Type: "songs", SaveDir: dir, TaskNum: 2, TaskTotal: 4},
+				{ID: "video", Type: "music-videos", SaveDir: dir, TaskNum: 3, TaskTotal: 4},
+				{ID: "four", Type: "songs", SaveDir: dir, TaskNum: 4, TaskTotal: 4},
+			}
+			for i, name := range []string{"first", "second", "video", "fourth"} {
+				tracks[i].Resp.Attributes.Name = name
+			}
+			// This is the same helper invoked by album, playlist and station dispatch.
+			out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2, 3, 4}, nil, "", "", nil) })
+			if c := r.State.Counter; c.Total != tc.wantTotal || c.Success != tc.wantSuccess || c.Error != tc.wantError {
+				t.Fatalf("counters=%+v, output=%q", c, out)
+			}
+			markers := []string{}
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "AMDL_TRACK_ERROR ") {
+					markers = append(markers, strings.TrimPrefix(line, "AMDL_TRACK_ERROR "))
+				}
+			}
+			if tc.stop {
+				if len(markers) != 1 || strings.Contains(out, "Track 3 of 4") {
+					t.Fatalf("stop marker/dispatch: %q", out)
+				}
+				var payload map[string]interface{}
+				if err := json.Unmarshal([]byte(markers[0]), &payload); err != nil {
+					t.Fatal(err)
+				}
+				if len(payload) != 4 || payload["id"] != "two" || payload["name"] != "second" || payload["track"] != float64(2) || payload["total"] != float64(4) {
+					t.Fatalf("marker=%v", payload)
+				}
+			} else if len(markers) != 0 || !strings.Contains(out, "Track 4 of 4") {
+				t.Fatalf("continue marker/dispatch: %q", out)
+			}
+		})
 	}
 }
 
-func TestStopOnTrackErrorHaltsAlbumLoopAfterFailingTrack(t *testing.T) {
-	r := NewRunner(config.ConfigSet{StopOnTrackError: true, AacType: "aac-lc"})
+func TestCollectionDispatchAudioOnlyVideoIsNotFailure(t *testing.T) {
+	r := NewRunner(config.ConfigSet{AudioOnly: true, StopOnTrackError: true, AacType: "aac-lc"})
 	r.Flags.AAC = true
-	album := &model.Album{ID: "album-1", Codec: "ALAC"}
-	// Task numbering mirrors ripAlbum: 1-based with TaskTotal equal to track count.
-	album.Tracks = []model.Track{
-		{ID: "song-1", Type: "songs", TaskNum: 1, TaskTotal: 3},
-		{ID: "song-2", Type: "songs", TaskNum: 2, TaskTotal: 3},
-		{ID: "song-3", Type: "songs", TaskNum: 3, TaskTotal: 3},
-	}
-	// Missing lite-server: no media access; track 1 counts a single error and
-	// the album-loop stop gate prevents tracks 2 and 3 from being processed.
-	var processed []string
-	for i := range album.Tracks {
-		r.ripTrack(&album.Tracks[i], "", "")
-		processed = append(processed, album.Tracks[i].ID)
-		if r.State.Counter.Error > 0 {
-			break
-		}
-	}
-	if len(processed) != 1 || r.State.Counter.Error != 1 || r.State.Counter.Total != 1 {
-		t.Fatalf("album loop stop gate: processed=%v counters=%+v", processed, r.State.Counter)
+	tracks := []model.Track{{ID: "mv", Type: "music-videos", TaskNum: 1, TaskTotal: 2}, {ID: "song", Type: "songs", TaskNum: 2, TaskTotal: 2}}
+	tracks[1].Resp.Attributes.Name = "later song"
+	out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2}, nil, "", "", nil) })
+	if r.State.Counter.NotSong != 1 || r.State.Counter.Error != 1 || r.State.Counter.Total != 2 || strings.Count(out, "AMDL_TRACK_ERROR ") != 1 || !strings.Contains(out, "Track 2 of 2") {
+		t.Fatalf("audio-only did not skip/continue: %+v %q", r.State.Counter, out)
 	}
 }

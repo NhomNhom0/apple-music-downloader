@@ -32,9 +32,40 @@ func trackErrorMarker(track *model.Track) string {
 	return "AMDL_TRACK_ERROR " + string(data)
 }
 
+// processSelectedTracks is shared by album, playlist and track-based station
+// dispatch. Track processing remains real so offline fixtures exercise the same
+// stop/skip accounting as direct songs.
+func (r *Runner) processSelectedTracks(tracks []model.Track, selected []int, completed []int, token, mediaUserToken string, process func(*model.Track)) {
+	for i := range tracks {
+		if contains(completed, i+1) {
+			r.State.Counter.Total++
+			r.State.Counter.Success++
+			continue
+		}
+		if !contains(selected, i+1) {
+			continue
+		}
+		before := r.State.Counter.Error
+		if process == nil {
+			r.ripTrack(&tracks[i], token, mediaUserToken)
+		} else {
+			process(&tracks[i])
+		}
+		if r.Config.StopOnTrackError && r.State.Counter.Error > before {
+			break
+		}
+	}
+}
+
 func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken string) {
 	before := r.State.Counter.Error
+	unavailableBefore := r.State.Counter.Unavailable
 	defer func() {
+		// Legacy Unavailable includes manifest, ALAC repair and tagging failures.
+		// In stop mode these must also make the job fail, not silently continue.
+		if r.Config.StopOnTrackError && r.State.Counter.Unavailable > unavailableBefore && r.State.Counter.Error == before {
+			r.State.Counter.Error++
+		}
 		if r.Config.StopOnTrackError && r.State.Counter.Error > before {
 			fmt.Println(trackErrorMarker(track))
 		}
@@ -305,7 +336,11 @@ func (r *Runner) ripTrack(track *model.Track, token string, mediaUserToken strin
 	}
 
 	// CONVERSION FEATURE hook
-	r.convertIfNeeded(track)
+	if err := r.convertIfNeeded(track); err != nil {
+		fmt.Println("Conversion failed:", err)
+		r.State.Counter.Error++
+		return
+	}
 
 	tArtistId := ""
 	if len(track.Resp.Relationships.Artists.Data) > 0 {
@@ -532,15 +567,7 @@ func (r *Runner) ripStation(albumId string, token string, storefront string, med
 	} else {
 		selected = station.ShowSelect()
 	}
-	for i := range station.Tracks {
-		i++
-		if contains(selected, i) {
-			r.ripTrack(&station.Tracks[i-1], token, mediaUserToken)
-			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
-				break
-			}
-		}
-	}
+	r.processSelectedTracks(station.Tracks, selected, nil, token, mediaUserToken, nil)
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)
 	return nil
 }
@@ -756,20 +783,7 @@ func (r *Runner) ripAlbum(albumId string, token string, storefront string, media
 	} else {
 		selected = album.ShowSelect()
 	}
-	for i := range album.Tracks {
-		i++
-		if contains(r.State.OKDict[albumId], i) {
-			r.State.Counter.Total++
-			r.State.Counter.Success++
-			continue
-		}
-		if contains(selected, i) {
-			r.ripTrack(&album.Tracks[i-1], token, mediaUserToken)
-			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
-				break
-			}
-		}
-	}
+	r.processSelectedTracks(album.Tracks, selected, r.State.OKDict[albumId], token, mediaUserToken, nil)
 	r.saveM3UPlaylist(albumFolderPath, albumFolderName)
 	return nil
 
@@ -957,20 +971,7 @@ func (r *Runner) ripPlaylist(playlistId string, token string, storefront string,
 	} else {
 		selected = playlist.ShowSelect()
 	}
-	for i := range playlist.Tracks {
-		i++
-		if contains(r.State.OKDict[playlistId], i) {
-			r.State.Counter.Total++
-			r.State.Counter.Success++
-			continue
-		}
-		if contains(selected, i) {
-			r.ripTrack(&playlist.Tracks[i-1], token, mediaUserToken)
-			if r.Config.StopOnTrackError && r.State.Counter.Error > 0 {
-				break
-			}
-		}
-	}
+	r.processSelectedTracks(playlist.Tracks, selected, r.State.OKDict[playlistId], token, mediaUserToken, nil)
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)
 	return nil
 }

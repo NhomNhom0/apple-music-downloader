@@ -1,9 +1,9 @@
 package app
 
 import (
+	"amdl/internal/model"
 	"bytes"
 	"fmt"
-	"amdl/internal/model"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,16 +61,16 @@ func (r *Runner) buildFFmpegArgs(ffmpegPath, inPath, outPath, targetFmt, extraAr
 
 // CONVERSION FEATURE: Perform conversion if enabled.
 
-func (r *Runner) convertIfNeeded(track *model.Track) {
+func (r *Runner) convertIfNeeded(track *model.Track) error {
 	if !r.Config.ConvertAfterDownload {
-		return
+		return nil
 	}
 	if r.Config.ConvertFormat == "" {
-		return
+		return nil
 	}
 	srcPath := track.SavePath
 	if srcPath == "" {
-		return
+		return nil
 	}
 	ext := strings.ToLower(filepath.Ext(srcPath))
 	targetFmt := strings.ToLower(r.Config.ConvertFormat)
@@ -78,13 +78,13 @@ func (r *Runner) convertIfNeeded(track *model.Track) {
 	// Map extension for output
 	if targetFmt == "copy" {
 		fmt.Println("Convert (copy) requested; skipping because it produces no new format.")
-		return
+		return nil
 	}
 
 	if r.Config.ConvertSkipIfSourceMatch {
 		if ext == "."+targetFmt {
 			fmt.Printf("Conversion skipped (already %s)\n", targetFmt)
-			return
+			return nil
 		}
 	}
 
@@ -95,7 +95,7 @@ func (r *Runner) convertIfNeeded(track *model.Track) {
 	if (targetFmt == "flac" || targetFmt == "wav") && r.isLossySource(ext, track.Codec) {
 		if r.Config.ConvertSkipLossyToLossless {
 			fmt.Println("Skipping conversion: source appears lossy and target is lossless; configured to skip.")
-			return
+			return nil
 		}
 		if r.Config.ConvertWarnLossyToLossless {
 			fmt.Println("Warning: Converting lossy source to lossless container will not improve quality.")
@@ -104,13 +104,12 @@ func (r *Runner) convertIfNeeded(track *model.Track) {
 
 	if _, err := exec.LookPath(r.Config.FFmpegPath); err != nil {
 		fmt.Printf("ffmpeg not found at '%s'; skipping conversion.\n", r.Config.FFmpegPath)
-		return
+		return nil
 	}
 
 	args, err := r.buildFFmpegArgs(r.Config.FFmpegPath, srcPath, outPath, targetFmt, r.Config.ConvertExtraArgs)
 	if err != nil {
-		fmt.Println("Conversion config error:", err)
-		return
+		return err
 	}
 
 	fmt.Printf("Converting -> %s ...\n", targetFmt)
@@ -124,9 +123,7 @@ func (r *Runner) convertIfNeeded(track *model.Track) {
 	cmd.Stdout = nil
 	start := time.Now()
 	if err := cmd.Run(); err != nil {
-		fmt.Println("Conversion failed:", err)
-		// leave original
-		return
+		return err
 	}
 	if r.Config.ConvertCheckBadALAC && stderr.Len() > 0 {
 		fmt.Print("Detected ALAC Error.", "\n")
@@ -160,5 +157,5 @@ func (r *Runner) convertIfNeeded(track *model.Track) {
 		track.SavePath = outPath
 		track.SaveName = filepath.Base(outPath)
 	}
-
+	return nil
 }
