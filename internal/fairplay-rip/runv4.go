@@ -140,6 +140,39 @@ type decryptResult struct {
 	RawOffset int64
 }
 
+// templateSelector keeps the active template and cache keyed by EXT-X-KEY URI.
+// A missing key inherits the active template as specified by HLS.
+type templateSelector struct {
+	currentURI string
+	cache      map[string]*temarimod.Temari
+}
+
+func newTemplateSelector() *templateSelector {
+	return &templateSelector{cache: make(map[string]*temarimod.Temari)}
+}
+
+func (s *templateSelector) selectForKey(keyURI, adamID string,
+	fetch func(adam, uri string) (*temarimod.Temari, error)) (*temarimod.Temari, bool, error) {
+	if keyURI == "" || keyURI == s.currentURI {
+		return s.cache[s.currentURI], false, nil
+	}
+	if cached, ok := s.cache[keyURI]; ok {
+		s.currentURI = keyURI
+		return cached, false, nil
+	}
+	fetchID := adamID
+	if keyURI == prefetchKey {
+		fetchID = "0"
+	}
+	tmpl, err := fetch(fetchID, keyURI)
+	if err != nil {
+		return nil, false, err
+	}
+	s.cache[keyURI] = tmpl
+	s.currentURI = keyURI
+	return tmpl, true, nil
+}
+
 // Run streams fragmented MP4 and decrypts on the fly: HTTP body is fed directly
 // through a fragment-reader -> decrypt-workers -> in-order-writer pipeline.
 func Run(adamId string, playlistUrl string, outfile string, Config config.ConfigSet) error {
@@ -361,6 +394,7 @@ func downloadAndDecryptFile(liteServer string, in io.Reader, outfile string,
 		defer close(jobs)
 		seq := 0
 		var tmpl *temarimod.Temari
+		selector := newTemplateSelector()
 
 		for i := 0; ; i++ {
 			if ctx.Err() != nil {
@@ -383,16 +417,18 @@ func downloadAndDecryptFile(liteServer string, in io.Reader, outfile string,
 				return errors.New("segment number out of sync")
 			}
 
-			key := segment.Key
-			if key != nil && (i < 2) {
-				if key.URI == prefetchKey {
-					tmpl, err = fetchTemplate(liteServer, "0", key.URI)
-				} else {
-					tmpl, err = fetchTemplate(liteServer, adamId, key.URI)
-				}
-				if err != nil {
-					return err
-				}
+			keyURI := ""
+			if segment.Key != nil {
+				keyURI = segment.Key.URI
+			}
+			var fetched bool
+			tmpl, fetched, err = selector.selectForKey(keyURI, adamId, func(adam, uri string) (*temarimod.Temari, error) {
+				return fetchTemplate(liteServer, adam, uri)
+			})
+			if err != nil {
+				return err
+			}
+			if fetched {
 				fetchedTemplates = append(fetchedTemplates, tmpl)
 			}
 
