@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,14 +35,39 @@ var ErrTimeout = errors.New("response timed out")
 // lib is the loaded Temari cdylib handle, set by Init.
 var lib *temarimod.Library
 
-// Init loads the Temari decryption library bundled with the module.
-func Init() error {
-	var err error
-	lib, err = temarimod.LoadDefault()
-	if err != nil {
-		return fmt.Errorf("runv4: load temari library: %w", err)
+// temariLibraryCandidates returns load locations in production priority order:
+// an explicit operator override, a library next to the executable, then Temari's
+// module-cache default. A configured override must not silently fall through.
+func temariLibraryCandidates(getenv func(string) string, executable func() (string, error)) []string {
+	if path := strings.TrimSpace(getenv("TEMARI_LIB")); path != "" {
+		return []string{path}
 	}
-	return nil
+	if path, err := executable(); err == nil && path != "" {
+		return []string{filepath.Join(filepath.Dir(path), "libtemari.so"), ""}
+	}
+	return []string{""}
+}
+
+// Init loads Temari from TEMARI_LIB, then a sibling libtemari.so, then default.
+func Init() error {
+	var lastErr error
+	for _, path := range temariLibraryCandidates(os.Getenv, os.Executable) {
+		var err error
+		if path == "" {
+			lib, err = temarimod.LoadDefault()
+		} else {
+			lib, err = temarimod.Load(path)
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// An explicit override is authoritative; do not load an unintended library.
+		if strings.TrimSpace(os.Getenv("TEMARI_LIB")) != "" {
+			break
+		}
+	}
+	return fmt.Errorf("runv4: load temari library: %w", lastErr)
 }
 
 type templateResponse struct {
