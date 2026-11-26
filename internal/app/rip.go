@@ -35,7 +35,7 @@ func trackErrorMarker(track *model.Track) string {
 // processSelectedTracks is shared by album, playlist and track-based station
 // dispatch. Track processing remains real so offline fixtures exercise the same
 // stop/skip accounting as direct songs.
-func (r *Runner) processSelectedTracks(tracks []model.Track, selected []int, completed []int, token, mediaUserToken string, process func(*model.Track)) {
+func (r *Runner) processSelectedTracks(tracks []model.Track, selected []int, completed []int, token, mediaUserToken string) {
 	for i := range tracks {
 		if contains(completed, i+1) {
 			r.State.Counter.Total++
@@ -46,11 +46,7 @@ func (r *Runner) processSelectedTracks(tracks []model.Track, selected []int, com
 			continue
 		}
 		before := r.State.Counter.Error
-		if process == nil {
-			r.ripTrack(&tracks[i], token, mediaUserToken)
-		} else {
-			process(&tracks[i])
-		}
+		r.ripTrack(&tracks[i], token, mediaUserToken)
 		if r.Config.StopOnTrackError && r.State.Counter.Error > before {
 			break
 		}
@@ -567,7 +563,7 @@ func (r *Runner) ripStation(albumId string, token string, storefront string, med
 	} else {
 		selected = station.ShowSelect()
 	}
-	r.processSelectedTracks(station.Tracks, selected, nil, token, mediaUserToken, nil)
+	r.processSelectedTracks(station.Tracks, selected, nil, token, mediaUserToken)
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)
 	return nil
 }
@@ -783,7 +779,7 @@ func (r *Runner) ripAlbum(albumId string, token string, storefront string, media
 	} else {
 		selected = album.ShowSelect()
 	}
-	r.processSelectedTracks(album.Tracks, selected, r.State.OKDict[albumId], token, mediaUserToken, nil)
+	r.processSelectedTracks(album.Tracks, selected, r.State.OKDict[albumId], token, mediaUserToken)
 	r.saveM3UPlaylist(albumFolderPath, albumFolderName)
 	return nil
 
@@ -971,7 +967,7 @@ func (r *Runner) ripPlaylist(playlistId string, token string, storefront string,
 	} else {
 		selected = playlist.ShowSelect()
 	}
-	r.processSelectedTracks(playlist.Tracks, selected, r.State.OKDict[playlistId], token, mediaUserToken, nil)
+	r.processSelectedTracks(playlist.Tracks, selected, r.State.OKDict[playlistId], token, mediaUserToken)
 	r.saveM3UPlaylist(playlistFolderPath, playlistFolder)
 	return nil
 }

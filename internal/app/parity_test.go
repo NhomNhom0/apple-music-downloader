@@ -56,7 +56,7 @@ func TestCollectionDispatchStopAndContinue(t *testing.T) {
 				tracks[i].Resp.Attributes.Name = name
 			}
 			// This is the same helper invoked by album, playlist and station dispatch.
-			out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2, 3, 4}, nil, "", "", nil) })
+			out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2, 3, 4}, nil, "", "") })
 			if c := r.State.Counter; c.Total != tc.wantTotal || c.Success != tc.wantSuccess || c.Error != tc.wantError {
 				t.Fatalf("counters=%+v, output=%q", c, out)
 			}
@@ -89,7 +89,7 @@ func TestCollectionDispatchAudioOnlyVideoIsNotFailure(t *testing.T) {
 	r.Flags.AAC = true
 	tracks := []model.Track{{ID: "mv", Type: "music-videos", TaskNum: 1, TaskTotal: 2}, {ID: "song", Type: "songs", TaskNum: 2, TaskTotal: 2}}
 	tracks[1].Resp.Attributes.Name = "later song"
-	out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2}, nil, "", "", nil) })
+	out := captureDispatch(t, func() { r.processSelectedTracks(tracks, []int{1, 2}, nil, "", "") })
 	if r.State.Counter.NotSong != 1 || r.State.Counter.Error != 1 || r.State.Counter.Total != 2 || strings.Count(out, "AMDL_TRACK_ERROR ") != 1 || !strings.Contains(out, "Track 2 of 2") {
 		t.Fatalf("audio-only did not skip/continue: %+v %q", r.State.Counter, out)
 	}
